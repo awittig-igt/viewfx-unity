@@ -20,4 +20,6 @@ Start the ViewFX API and website. Set **ViewFX site** to `http://localhost:5173`
 
 Connections are independent per project path and operating-system user. On Windows, credentials are encrypted with Windows DPAPI and saved under the user's local application data, outside the Unity project. On macOS/Linux this first version uses Unity SessionState, so reconnect after closing Unity. Credentials expire after 90 days. **Check Connection** verifies the current credential.
 
-No effect downloads or uploads are implemented in this release.
+## Download effects
+
+Connected, open projects register automatically even when the ViewFX window is closed. On the website, click **Add to Unity**, select this project, and click **Proceed**. The site shows download progress and can cancel the download. After completion, Unity opens its standard package import dialog for review. Imports wait while Unity is compiling, updating assets, or in Play mode. Downloads are saved to the operating system's temporary ViewFX directory; cancelled files are removed. Uploads are not implemented yet.

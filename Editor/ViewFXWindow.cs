@@ -77,6 +77,7 @@ namespace ViewFX.Editor
             EditorGUILayout.LabelField("Project", new DirectoryInfo(Path.GetDirectoryName(Application.dataPath)).Name);
             EditorGUILayout.Space(8);
             EditorGUILayout.HelpBox(message, MessageType.Info);
+            if (!string.IsNullOrEmpty(DownloadService.Status)) EditorGUILayout.HelpBox(DownloadService.Status, MessageType.Info);
             bool connected = !string.IsNullOrEmpty(state.token);
             bool pending = !string.IsNullOrEmpty(state.id);
             using (new EditorGUI.DisabledScope(connected || pending || activeRequest != null))
