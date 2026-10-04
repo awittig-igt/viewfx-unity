@@ -7,7 +7,7 @@ Editor-only companion package. Requires Unity 2022.3 or newer.
 In Unity's Package Manager, choose **Install package from Git URL** (or **Add package from git URL** on older editors) and paste:
 
 ```text
-https://github.com/igt-all/viewfx-unity.git
+https://github.com/awittig-igt/viewfx-unity.git
 ```
 
 ## Install locally
