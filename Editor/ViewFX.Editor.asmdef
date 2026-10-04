@@ -1,0 +1,6 @@
+{
+  "name": "ViewFX.Editor",
+  "rootNamespace": "ViewFX.Editor",
+  "includePlatforms": ["Editor"],
+  "autoReferenced": true
+}

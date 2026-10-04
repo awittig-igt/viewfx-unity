@@ -1,0 +1,7 @@
+{
+  "name": "com.viewfx.editor",
+  "version": "0.1.0",
+  "displayName": "ViewFX",
+  "description": "Connect your Unity project to your ViewFX account.",
+  "unity": "2022.3"
+}
