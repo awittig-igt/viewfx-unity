@@ -47,6 +47,7 @@ namespace ViewFX.Editor
             try { TickSafe(); }
             catch (Exception error)
             {
+                Debug.LogException(error);
                 Status = "ViewFX download error: " + error.Message;
                 if (job != null) pendingUpdate = new Update { sessionId = sessionId, status = "failed", progress = 0, error = "Unity could not download or open the effect package." };
                 nextRequest = EditorApplication.timeSinceStartup + 3;
@@ -74,6 +75,7 @@ namespace ViewFX.Editor
                         if (string.IsNullOrEmpty(sessionId)) { sessionId = Guid.NewGuid().ToString(); SessionState.SetString(key, sessionId); }
                         string pending = SessionState.GetString(PendingKey, "");
                         if (!string.IsNullOrEmpty(pending)) job = JsonUtility.FromJson<Download>(pending);
+                        if (job != null && string.IsNullOrEmpty(job.id)) Discard();
                     }
                 }
             }
@@ -85,7 +87,14 @@ namespace ViewFX.Editor
                 control = null; callback = null;
                 try
                 {
-                    if (completed.result == UnityWebRequest.Result.Success) handler(JsonUtility.FromJson<Reply>(completed.downloadHandler.text));
+                    if (completed.result == UnityWebRequest.Result.Success)
+                    {
+                        var reply = JsonUtility.FromJson<Reply>(completed.downloadHandler.text);
+                        // Unity can deserialize a JSON null into an empty serializable object.
+                        // Only a download with an ID represents a real server job.
+                        if (reply.download != null && string.IsNullOrEmpty(reply.download.id)) reply.download = null;
+                        handler(reply);
+                    }
                     else if (completed.responseCode == 409) Discard();
                     else if (completed.responseCode == 401) { StopRequests(); Discard(); CredentialStore.Clear(); connection = null; }
                     else { Status = "Waiting for the ViewFX connection..."; nextRequest = now + 3; }
@@ -107,13 +116,15 @@ namespace ViewFX.Editor
                 if (transfer.isDone)
                 {
                     bool success = transfer.result == UnityWebRequest.Result.Success;
+                    string failure = success ? null : "Package download failed (HTTP " + transfer.responseCode + "): " + transfer.error;
                     transfer.Dispose(); transfer = null;
                     if (success)
                     {
                         using (var stream = File.OpenRead(filePath)) success = stream.ReadByte() == 0x1f && stream.ReadByte() == 0x8b;
+                        if (!success) failure = "The downloaded file is not a valid Unity package.";
                     }
                     pendingUpdate = new Update { sessionId = sessionId, status = success ? "completed" : "failed", progress = success ? 1 : 0,
-                        error = success ? null : "Unity could not download a valid effect package. Retry the download." };
+                        error = failure == null ? null : failure.Substring(0, Math.Min(failure.Length, 300)) };
                 }
             }
             if (awaitingImport && !Busy)
@@ -169,14 +180,17 @@ namespace ViewFX.Editor
 
         private static void StartDownload()
         {
-            if (!Uri.TryCreate(job.packageUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
+            bool authenticated = job.packageUrl == "/api/unity/editor/downloads/" + job.id + "/package";
+            if (!authenticated && (!Uri.TryCreate(job.packageUrl, UriKind.Absolute, out var uri) || uri.Scheme != "https" ||
                 (uri.Host != "github.com" && uri.Host != "raw.githubusercontent.com") || !string.IsNullOrEmpty(uri.UserInfo))
-                throw new InvalidOperationException("Invalid effect package URL.");
+                )
+                throw new InvalidOperationException("Invalid effect package URL: " + (job.packageUrl ?? "<missing>") + ".");
             Directory.CreateDirectory(Path.GetDirectoryName(filePath));
-            transfer = UnityWebRequest.Get(job.packageUrl);
-            transfer.downloadHandler.Dispose();
-            transfer.downloadHandler = new DownloadHandlerFile(filePath) { removeFileOnAbort = true };
-            transfer.timeout = 600;
+            transfer = new UnityWebRequest(authenticated ? connection.siteUrl + job.packageUrl : job.packageUrl, "GET") {
+                downloadHandler = new DownloadHandlerFile(filePath) { removeFileOnAbort = true }, timeout = 600,
+                redirectLimit = authenticated ? 0 : 32
+            };
+            if (authenticated) transfer.SetRequestHeader("Authorization", "Bearer " + connection.token);
             transfer.SendWebRequest();
         }
 
