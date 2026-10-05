@@ -25,6 +25,7 @@ namespace ViewFX.Editor
 
         private State state = new State();
         private Texture2D logo;
+        private int selectedTab;
         private UnityWebRequest activeRequest;
         private Action<Reply> onReply;
         private double nextPoll;
@@ -103,6 +104,20 @@ namespace ViewFX.Editor
                 }
                 EditorGUILayout.Space(8);
             }
+            bool signedIn = !string.IsNullOrEmpty(state.token);
+            if (!signedIn) selectedTab = 0;
+            int requestedTab = GUILayout.Toolbar(selectedTab, new[] { "Home", "Upload" });
+            if (requestedTab == 1 && !signedIn)
+            {
+                ShowTemporaryMessage("Sign in to your ViewFX account to access Upload.");
+            }
+            else selectedTab = requestedTab;
+            EditorGUILayout.Space(8);
+            if (selectedTab == 0) DrawHome();
+        }
+
+        private void DrawHome()
+        {
             EditorGUILayout.LabelField("ViewFX Manager", EditorStyles.boldLabel);
             EditorGUILayout.LabelField("Current Project:", new DirectoryInfo(Path.GetDirectoryName(Application.dataPath)).Name);
             EditorGUILayout.Space(4);
@@ -306,6 +321,7 @@ namespace ViewFX.Editor
 
         private void Clear()
         {
+            selectedTab = 0;
             CredentialStore.Clear();
             SessionState.EraseString(StateKey);
             state = new State { siteUrl = state.siteUrl };
