@@ -24,10 +24,20 @@ namespace ViewFX.Editor
         [Serializable] private class ProjectRequest { public string projectName; public string unityVersion; }
 
         private State state = new State();
+        private Texture2D logo;
         private UnityWebRequest activeRequest;
         private Action<Reply> onReply;
         private double nextPoll;
-        private string message = "Connect your ViewFX account.";
+        private const double MessageDuration = 5;
+        private double messageExpiresAt;
+        private string messageText = "Connect your ViewFX account.";
+        private string message
+        {
+            get => messageText;
+            set { messageText = value; messageExpiresAt = 0; }
+        }
+        private string lastDownloadStatus;
+        private double downloadMessageExpiresAt;
         private string StateKey => "ViewFX.Pending." + CredentialStore.ProjectKey;
 
         [InitializeOnLoadMethod]
@@ -49,6 +59,9 @@ namespace ViewFX.Editor
         private void OnEnable()
         {
             minSize = new Vector2(340, 270);
+            string scriptPath = AssetDatabase.GetAssetPath(MonoScript.FromScriptableObject(this));
+            logo = AssetDatabase.LoadAssetAtPath<Texture2D>(
+                Path.GetDirectoryName(scriptPath).Replace('\\', '/') + "/ViewFXLogo.png");
             try
             {
                 string saved = CredentialStore.Load();
@@ -73,27 +86,58 @@ namespace ViewFX.Editor
         private void OnGUI()
         {
             EditorGUILayout.Space(12);
-            EditorGUILayout.LabelField("ViewFX", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField("Project", new DirectoryInfo(Path.GetDirectoryName(Application.dataPath)).Name);
-            EditorGUILayout.Space(8);
-            EditorGUILayout.HelpBox(message, MessageType.Info);
-            if (!string.IsNullOrEmpty(DownloadService.Status)) EditorGUILayout.HelpBox(DownloadService.Status, MessageType.Info);
+            if (logo != null)
+            {
+                Rect logoArea = GUILayoutUtility.GetRect(0, 64, GUILayout.ExpandWidth(true));
+                float logoWidth = Mathf.Min(256, logoArea.width);
+                Rect logoRect = new Rect(logoArea.center.x - logoWidth / 2, logoArea.y, logoWidth, logoArea.height);
+                Color previousColor = GUI.color;
+                try
+                {
+                    GUI.color = Color.white;
+                    GUI.DrawTexture(logoRect, logo, ScaleMode.ScaleToFit, true);
+                }
+                finally
+                {
+                    GUI.color = previousColor;
+                }
+                EditorGUILayout.Space(8);
+            }
+            EditorGUILayout.LabelField("ViewFX Manager", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Current Project:", new DirectoryInfo(Path.GetDirectoryName(Application.dataPath)).Name);
+            EditorGUILayout.Space(4);
             bool connected = !string.IsNullOrEmpty(state.token);
             bool pending = !string.IsNullOrEmpty(state.id);
             using (new EditorGUI.DisabledScope(connected || pending || activeRequest != null))
-                state.siteUrl = EditorGUILayout.TextField("ViewFX site", state.siteUrl);
+                state.siteUrl = EditorGUILayout.TextField("ViewFX site:", state.siteUrl);
             if (connected)
             {
-                EditorGUILayout.LabelField("Account", state.user?.name ?? "");
-                EditorGUILayout.LabelField("Email", state.user?.email ?? "");
+                EditorGUILayout.Space(8);
+                using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+                {
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField("Account information", EditorStyles.boldLabel);
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField("Name", EditorStyles.miniLabel);
+                    EditorGUILayout.SelectableLabel(
+                        string.IsNullOrEmpty(state.user?.name) ? "Not available" : state.user.name,
+                        EditorStyles.label, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                    EditorGUILayout.LabelField("Email", EditorStyles.miniLabel);
+                    EditorGUILayout.SelectableLabel(
+                        string.IsNullOrEmpty(state.user?.email) ? "Not available" : state.user.email,
+                        EditorStyles.label, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                    EditorGUILayout.Space(4);
+                }
+                EditorGUILayout.Space(8);
 #if !UNITY_EDITOR_WIN
                 EditorGUILayout.HelpBox("This connection lasts until Unity closes on this platform.", MessageType.Info);
 #endif
                 using (new EditorGUI.DisabledScope(activeRequest != null))
                 {
-                    if (GUILayout.Button("Disconnect")) Disconnect();
+                    if (TintedButton("Disconnect", new Color(1f, 0.78f, 0.78f))) Disconnect();
                     if (GUILayout.Button("Check Connection")) Verify();
                 }
+                DrawMessages();
             }
             else if (pending)
             {
@@ -104,7 +148,57 @@ namespace ViewFX.Editor
             else
             {
                 using (new EditorGUI.DisabledScope(activeRequest != null))
-                    if (GUILayout.Button("Connect to ViewFX")) Connect();
+                    if (TintedButton("Connect to ViewFX", new Color(0.78f, 1f, 0.82f))) Connect();
+            }
+            if (!connected) DrawMessages();
+        }
+
+        private void DrawMessages()
+        {
+            DrawMessage(message, messageExpiresAt);
+            DrawMessage(DownloadService.Status, downloadMessageExpiresAt);
+        }
+
+        private void ShowTemporaryMessage(string text)
+        {
+            message = text;
+            messageExpiresAt = EditorApplication.timeSinceStartup + MessageDuration;
+        }
+
+        private static void DrawMessage(string text, double expiresAt)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            if (string.IsNullOrEmpty(text) || (expiresAt > 0 && now >= expiresAt)) return;
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    GUILayout.Label(EditorGUIUtility.IconContent("console.infoicon"),
+                        GUILayout.Width(24), GUILayout.Height(24));
+                    EditorGUILayout.LabelField(text, EditorStyles.wordWrappedLabel);
+                }
+                if (expiresAt > 0)
+                {
+                    Rect bar = GUILayoutUtility.GetRect(0, 3, GUILayout.ExpandWidth(true));
+                    EditorGUI.DrawRect(bar, new Color(0.5f, 0.5f, 0.5f, 0.2f));
+                    bar.width *= Mathf.Clamp01((float)((expiresAt - now) / MessageDuration));
+                    EditorGUI.DrawRect(bar, new Color(0.45f, 0.75f, 0.55f));
+                    EditorGUILayout.Space(2);
+                }
+            }
+        }
+
+        private static bool TintedButton(string label, Color tint)
+        {
+            Color previousColor = GUI.backgroundColor;
+            try
+            {
+                GUI.backgroundColor = previousColor * tint;
+                return GUILayout.Button(label);
+            }
+            finally
+            {
+                GUI.backgroundColor = previousColor;
             }
         }
 
@@ -138,6 +232,20 @@ namespace ViewFX.Editor
 
         private void Tick()
         {
+            double now = EditorApplication.timeSinceStartup;
+            if (lastDownloadStatus != DownloadService.Status)
+            {
+                lastDownloadStatus = DownloadService.Status;
+                downloadMessageExpiresAt = lastDownloadStatus == "Download complete. Review the package in Unity's import dialog."
+                    ? now + MessageDuration : 0;
+                Repaint();
+            }
+            if (messageExpiresAt > 0)
+            {
+                if (now >= messageExpiresAt) message = "";
+                Repaint();
+            }
+            if (downloadMessageExpiresAt > 0 && now <= downloadMessageExpiresAt + 0.1) Repaint();
             if (activeRequest != null)
             {
                 if (!activeRequest.isDone) return;
@@ -173,7 +281,7 @@ namespace ViewFX.Editor
                     CredentialStore.Save(JsonUtility.ToJson(connected));
                     state = connected;
                     SessionState.EraseString(StateKey);
-                    message = "Connected to ViewFX.";
+                    ShowTemporaryMessage("Connected to ViewFX.");
                 }
                 else if (reply.status != "pending")
                 {
@@ -184,17 +292,17 @@ namespace ViewFX.Editor
         }
 
         private void Verify() => Send("GET", "/api/unity/connection", state.token, null, reply =>
-        { state.user = reply.user; message = "Connected to ViewFX."; });
+        { state.user = reply.user; ShowTemporaryMessage("Connected to ViewFX."); });
 
         private void Disconnect()
         {
             message = "Disconnecting...";
             Send("DELETE", "/api/unity/connection", state.token, null, _ =>
-            { Clear(); message = "Disconnected from ViewFX."; });
+            { Clear(); ShowTemporaryMessage("Disconnected from ViewFX."); });
         }
 
         private void Cancel() => Send("DELETE", "/api/unity/requests/" + state.id, state.pollToken, null, _ =>
-        { Clear(); message = "Connection cancelled."; });
+        { Clear(); ShowTemporaryMessage("Connection cancelled."); });
 
         private void Clear()
         {
